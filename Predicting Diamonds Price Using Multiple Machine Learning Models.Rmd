@@ -1,0 +1,415 @@
+---
+title: "Team_3_Group_Project"
+author: "Hanyu Chen,Song Lin,Rohan Gupta,Deniz Ozakyol,Yesol Lee, Shi Wang"
+date: "10/7/2021"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+##Install Packages##
+```{r}
+#install.packages(c("rpart.plot", "rpart"))
+#install.packages(c("randomForest"))
+#install.packages(c("gbm"))
+#install.packages('data.table')
+#install.packages('ggplot2')
+#install.packages('fastDummies')
+library('fastDummies')
+library(scales) 
+library(rpart) 
+library(rpart.plot)
+
+#library(dplyr)
+library(ggplot2)
+#library(caTools)
+#library(corrgram)
+library(data.table)
+library(ggthemes)
+library(scales)
+library(randomForest)
+library(fastDummies)
+
+library(glmnet)
+library(gbm)
+theme_set(theme_bw())
+
+```
+
+##Loading the Dataset##
+```{r}
+diamond=fread("~/Desktop/BU/BA810/diamonds_dataset.csv")
+```
+
+##Data Cleaning##
+```{r data_cleaning}
+## Check if there is any missing value
+any(is.na(diamond))
+## Drop Unnecessary columns
+diamond <- diamond[,url:=NULL]
+diamond <- diamond[,date_fetched:=NULL]
+diamond <- diamond[,id:=NULL]
+## Change our predictor price to log
+diamond$logprice=log(diamond$price + 1)
+```
+
+## Why using log price
+```{r}
+ggplot(aes(price), data=diamond) +
+  geom_histogram() +
+  ggtitle('Price (log10)') +
+  scale_x_log10()
+
+#Since it appears to be a normal distribution
+```
+
+## Data Introduction##
+
+1. Carat: The boxplot indicates there are many outliers greater than the 3Q + 1.5IQR.
+```{r}
+ggplot(diamond, aes(x="", y=carat)) +  
+  geom_boxplot()
+```
+
+2. The relationship between logprice and carat
+
+When we computed scatter plot between carat and price, we found that most of our datapoints are concentrated in the carat range of 0 to 8. We also found that there are positive relationship between carat and price.
+```{r}
+ggplot(diamond, aes(x=carat, y=logprice)) +  
+  geom_point() + 
+  geom_smooth(method=lm)
+cor(diamond$carat,diamond$price)
+##The correlation between carat and price is 0.555784
+```
+
+3. Average price of each shape
+
+Shape Asscher has the highest averabe price. We thought this is very interesting because according to the report
+from “The Diamond Regitry” the round shape diamond are the most expensive.
+```{r}
+avg_p_shape <- diamond[, mean(price), by=shape] 
+setnames(avg_p_shape, "V1", "avg_price") 
+avg_p_shape <- avg_p_shape[order(avg_price, decreasing = TRUE)] 
+
+ggplot(avg_p_shape, aes(x=reorder(shape, -avg_price), y=avg_price, fill=shape)) + 
+  geom_bar(stat="identity") + 
+  scale_fill_brewer(palette = "Set3") + 
+  geom_text(aes(label=round(avg_price,0)), color="black", vjust=1.6) + 
+  scale_x_discrete(name ="Shape of Diamond") + 
+  ggtitle("Average price by shape") + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+4. Proportion of each type
+```{r}
+type_count <- diamond[,.N, by=type] 
+setnames(type_count, "N", "count") 
+ 
+ggplot(type_count, aes(x = "", y = count, fill = type)) + 
+     geom_bar(width = 1, stat = "identity") + 
+     coord_polar(theta = "y", start = 0) + 
+     geom_text(aes(label = count), position = position_stack(vjust = 0.5)) + 
+     ggtitle("Proportion of type") + 
+     theme(plot.title = element_text(hjust = 0.5), 
+           axis.ticks = element_blank())
+```
+
+5. Average price for each type
+In terms of median, lab-produced diamonds has higher price. Natural diamonds, however, are more dispersed and it is more likely to have higher price compared to lab-produced diamonds
+```{r}
+avg_p_type <- diamond[, mean(price), by=type] 
+setnames(avg_p_type, "V1", "avg_price") 
+avg_p_type <- avg_p_type[order(avg_price, decreasing = TRUE)] 
+avg_p_type
+##       type avg_price 
+## 1: natural  3358.127 
+## 2:     lab  3184.541
+# price distribution by type 
+ggplot(diamond, aes(x=price)) +
+  geom_boxplot() +
+  scale_x_log10() +
+  facet_wrap(~type)
+```
+
+6. Average price of each clarity
+The FL clarity level shows an exceptionally high price. The price is quite similar throughout the rest of the clarity level.
+
+```{r}
+avg_p_clarity <- diamond[, mean(price), by=clarity] 
+setnames(avg_p_clarity, "V1", "avg_price") 
+avg_p_clarity <- avg_p_clarity[order(avg_price, decreasing = TRUE)] 
+ 
+ggplot(avg_p_clarity, aes(x=reorder(clarity, -avg_price), y=avg_price, fill=clarity)) + 
+  geom_bar(stat="identity") + 
+  scale_fill_brewer(palette = "Set3") + 
+  geom_text(aes(label=round(avg_price,0)), color="black", vjust=1.6) + 
+  scale_x_discrete(name ="Clarity of Diamond") + 
+  ggtitle("Average price by clarity") + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+7. Average price of each color
+Price only slightly varies by the color of the diamonds. Customers are not very sensitive about color
+```{r}
+avg_p_color <- diamond[, mean(price), by=color] 
+setnames(avg_p_color, "V1", "avg_price") 
+avg_p_color <- avg_p_color[order(avg_price, decreasing = TRUE)] 
+ 
+ggplot(avg_p_color, aes(x=reorder(color, -avg_price), y=avg_price, fill=color)) + 
+  geom_bar(stat="identity") + 
+  scale_fill_brewer(palette = "Set3") + 
+  geom_text(aes(label=round(avg_price,0)), color="black", vjust=1.6) + 
+  scale_x_discrete(name ="Color of Diamond") + 
+  ggtitle("Average price by color") + 
+  theme(plot.title = element_text(hjust = 0.5))
+```
+
+8. The relationship between clarity and cut, and super ideal cut with VS1 clear is the most popular one
+```{r}
+order_level<-c("Fair","Good","Very Good","Ideal","Super Ideal")
+diamond$cut<-factor(diamond$cut,levels=order_level)
+ggplot(diamond, aes(x = cut, fill = clarity)) + 
+  geom_bar(position = "dodge") +
+  theme(axis.text.x = element_text(angle = 45))+
+  labs(title="Number of Diamond Cut Based on Clarity")+
+  theme(plot.title = element_text(hjust = 0.5))+
+  scale_fill_brewer(palette="Paired")
+```
+
+## Machine Learning 
+
+##Dummy variables Conversion##
+```{r Dummy Varible}
+dd_dummies <- dummy_cols(diamond,select_columns = NULL)
+colnames(dd_dummies)[colnames(dd_dummies) == 'cut_Super Ideal'] <- 'cut_SuperIdeal'
+colnames(dd_dummies)[colnames(dd_dummies) == 'cut_Very Good'] <- 'cut_VeryGood'
+```
+
+##Train/Test Split##
+```{r}
+set.seed(810)
+# 70% train, 30% test
+data1 = sort(sample(nrow(dd_dummies), nrow(dd_dummies)*.7))
+train<-dd_dummies[data1,]
+test<-dd_dummies[-data1,]
+
+```
+
+1. Linear Regression Model
+## Fit the linear regression model
+```{r}
+model <- lm(logprice ~ carat + shape_Cushion + shape_Emerald + shape_Heart + shape_Marquise + shape_Oval + shape_Pear + shape_Princess + shape_Radiant + shape_Round + cut_Good + cut_Ideal + cut_SuperIdeal + cut_VeryGood + color_E + color_F + color_G + color_H + color_I + color_J + clarity_IF + clarity_SI1 + clarity_SI2 + clarity_VS1 + clarity_VS2 + clarity_VVS1 + clarity_VVS2 + report_GIA + report_HRD + report_IGI + type_natural, data=train)
+```
+
+## Predict the diamond price with test set
+```{r}
+preds <- predict(model, test)
+modelEval <- cbind(test$logprice, preds)
+colnames(modelEval) <- c('Actual', 'Predicted')
+modelEval <- as.data.frame(modelEval)
+
+```
+
+## Calculate the MSE test, and the MSE of linear Regression is 0.1782691
+```{r}
+mse <- mean((modelEval$Actual - modelEval$Predicted)^2)
+mse
+#0.1782691
+```
+
+
+                        
+2. Lasso Regression
+```{r}
+
+f1_L <- as.formula( logprice ~ +cut_Fair+cut_Good+cut_Ideal+cut_SuperIdeal+cut_VeryGood+
+                      color_D+color_E+color_F+color_G+color_H+color_I+color_J+
+                      report_GCAL+report_GIA+report_HRD+report_IGI+
+                      clarity_FL+clarity_IF+clarity_SI1+clarity_SI2+clarity_VS1+clarity_VS2+clarity_VVS1+clarity_VVS2+
+                      type_lab+type_natural+
+                      shape_Asscher+shape_Cushion+shape_Emerald+shape_Heart+shape_Marquise+shape_Oval+shape_Pear+shape_Princess+shape_Radiant+shape_Round+
+                      carat)
+
+#Training the model  
+x.train_L <- model.matrix(f1_L, train)[, -1]
+y.train_L <- train$logprice
+x.test_L <- model.matrix(f1_L, test)[, -1]
+y2.test_L <- test$logprice
+f1.L <- cv.glmnet(x.train_L, y.train_L, alpha = 1, nfolds = 10)
+
+
+# Finding Test and Train MSEs
+yhat.train.L <- predict(f1.L, x.train_L, s = f1.L$lambda.1se)
+mse.train.L <- mean((y.train_L - yhat.train.L)^2)
+yhat.test.L <- predict(f1.L, x.test_L, s = f1.L$lambda.1se)
+mse.test.L <- mean((y2.test_L - yhat.test.L)^2)
+L.coef <- predict(f1.L, type = "coefficients",s = f1.L$lambda.1se)
+
+#Coefficients
+L.coef
+mse.test.L
+
+
+
+```
+
+3. Ridge Regression 
+```{r}
+f1_R <- as.formula( logprice ~ cut_Fair+cut_Good+cut_Ideal+cut_SuperIdeal+cut_VeryGood+
+                      color_D+color_E+color_F+color_G+color_H+color_I+color_J+
+                      report_GCAL+report_GIA+report_HRD+report_IGI+
+                      clarity_FL+clarity_IF+clarity_SI1+clarity_SI2+clarity_VS1+clarity_VS2+clarity_VVS1+clarity_VVS2+
+                      type_lab+type_natural+
+                      shape_Asscher+shape_Cushion+shape_Emerald+shape_Heart+shape_Marquise+shape_Oval+shape_Pear+shape_Princess+shape_Radiant+shape_Round +carat)
+
+#Training the Model
+x.train_R <- model.matrix(f1_R, train)[, -1]
+y.train_R <- train$logprice
+x.test_R <- model.matrix(f1_R, test)[, -1]
+y.test_R <- test$logprice
+f1.R <- cv.glmnet(x.train_R, y.train_R, alpha = 0, nfolds = 10)
+
+#Finding MSes
+
+yhat.train.R <- predict(f1.R, x.train_R, s = f1.R$lambda.1se)
+mse.train.R <- mean((y.train_R - yhat.train.R)^2)
+yhat.test.R <- predict(f1.R, x.test_R, s = f1.R$lambda.1se)
+mse.test.R <- mean((y.test_R - yhat.test.R)^2)
+R.coef <- predict(f1.R, type = "coefficients",s = f1.R$lambda.1se)
+
+#Coefficients
+R.coef
+mse.test.R
+
+```
+
+
+
+
+4. Regression Tree
+
+```{r}
+x.train_RT<- train[,.(cut,color,report,clarity,type,shape,carat,logprice)]
+x.test_RT <- test[,.(cut,color,report,clarity,type,shape,carat,logprice)]
+
+f1_RT <- as.formula( logprice ~ carat + cut + clarity + color+
+                    report+type+shape)
+
+#Model Training
+x.train.RT <- model.matrix(f1_RT, x.train_RT)[, -1]
+y.train.RT <- x.train_RT$logprice
+x.test.RT <- model.matrix(f1_RT, x.test_RT)[, -1]
+y.test.RT <- x.test_RT$logprice
+fit.tree <- rpart(f1_RT,
+                  x.train_RT,
+                  control = rpart.control(cp = 0.001))
+
+#Plotting and Computing MSEs
+par(xpd = TRUE)
+yhat.tree <- predict(fit.tree,x.train_RT)
+mse.tree <- mean((yhat.tree - y.train.RT) ^ 2)
+mse.tree
+
+yhat.tree.test <- predict(fit.tree,x.test_RT)
+mse.tree.test <- mean((yhat.tree.test - y.test.RT) ^ 2)
+
+rpart.plot(fit.tree, type = 1)
+mse.tree
+```
+
+
+
+
+5.random Forest
+```{r}
+f1_RFC <- as.formula( logprice ~ carat + cut + clarity + color+
+                    report+type+shape)
+
+
+fit.rndfor <- randomForest(f1_RFC, x.train_RT,
+                           ntree=500,
+                           do.trace=F)
+
+#Calculating the MSEs
+yhat.rndfor <- predict(fit.rndfor, x.train_RT) 
+mse.tree_RFC <- mean((yhat.rndfor - y.train.RT) ^ 2) 
+
+
+yhat.rndfor.test <- predict(fit.rndfor, x.test_RT) 
+mse.tree.test_RFC <- mean((yhat.rndfor.test - y.test.RT) ^ 2) 
+
+
+varImpPlot(fit.rndfor)
+mse.tree.test_RFC
+
+
+
+
+
+
+
+```
+
+6. Boosted Forest
+```{r}
+
+f1_BF <- as.formula( logprice ~ cut_Fair+cut_Good+cut_Ideal+cut_SuperIdeal+cut_VeryGood+
+                      color_D+color_E+color_F+color_G+color_H+color_I+color_J+
+                      report_GCAL+report_GIA+report_HRD+report_IGI+
+                      clarity_FL+clarity_IF+clarity_SI1+clarity_SI2+clarity_VS1+clarity_VS2+clarity_VVS1+clarity_VVS2+
+                      type_lab+type_natural+
+                      shape_Asscher+shape_Cushion+shape_Emerald+shape_Heart+shape_Marquise+shape_Oval+shape_Pear+shape_Princess+shape_Radiant+shape_Round+
+                      carat)
+
+
+#Training the model
+x.train_BF <- model.matrix(f1_BF, train)[, -1]
+y.train_BF <- train$logprice
+x.test_BF <- model.matrix(f1_BF, test)[, -1]
+y.test_BF <- test$logprice
+
+
+fit.btree <- gbm(f1_BF,train,
+      distribution = "gaussian",
+      n.trees = 5000,
+      interaction.depth = 1,
+      shrinkage = 0.1, cv.folds=5)
+
+#CV gives best iteration to be 4982
+#Calculating MSEs
+relative.influence(fit.btree)
+yhat.btree <- predict(fit.btree, train, n.trees = 4982) 
+mse.btree <- mean((yhat.btree - y.train_BF) ^ 2) 
+
+
+yhat.btree.test <- predict(fit.btree, test, n.trees = 4982)
+mse.btree.test <- mean((yhat.btree.test - y.test_BF) ^ 2)
+
+print(summary.gbm(fit.btree))
+mse.btree.test
+
+
+
+```
+7. Conclusion
+```{r}
+A <- data.table(
+  carat = test$carat,
+   logprice = y.test_BF,
+  dataset = "Actual"
+)
+P <- rbind(A, data.table(
+  carat = test$carat,
+  logprice = yhat.btree.test,
+  dataset = "Predicted"))
+
+ggplot(P, aes(carat, logprice, color=dataset)) + geom_smooth()
+
+ # Checking Points where dimaond is overpriced and where it is underpriced against the most important variable using Boosted Trees, which comes out to be the best model!
+
+```
+
