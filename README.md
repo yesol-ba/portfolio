@@ -5,3 +5,4 @@ Sally's business analytics portfolios
 2. Customer Purchase Pattern Study Based on Historical Data
 3. Predicting Diamonds Price Using Multiple Machine Learning Models (rmd & pdf)
 4. Framingham Heart Study - Prediction
+5. Student Performance in Exams
